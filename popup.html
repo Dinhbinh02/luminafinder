@@ -2,12 +2,12 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Lumina Finder</title>
+  <title>Fetchy</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <header class="header">
-    <h1>Lumina Finder</h1>
+    <h1>Fetchy</h1>
     <div id="main-toolbar" class="toolbar">
       <div id="select-all-group" class="checkbox-group" style="display: none;">
         <input type="checkbox" id="select-all-checkbox" checked>
@@ -27,6 +27,49 @@
       <div id="folder-content" class="folder-list" style="display: none;">
         <div id="file-list-container"></div>
       </div>
+    </section>
+
+    <section id="audio-capture-section" class="card" style="display: none;">
+      <div class="target-header">
+        <h2 id="audio-capture-title">Audio Extractor</h2>
+        <div class="type-badge">VIDEO</div>
+      </div>
+      <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+        <div style="flex: 1;">
+          <label style="font-size: 11px; color: var(--muted-foreground); display: block; margin-bottom: 4px;">Record Speed</label>
+          <select id="record-speed-select" style="margin-bottom: 0;">
+            <option value="1.5">1.5x</option>
+            <option value="1.75">1.75x</option>
+            <option value="2">2x</option>
+            <option value="4">4x</option>
+            <option value="8">8x</option>
+            <option value="10" selected>10x</option>
+            <option value="16">16x</option>
+          </select>
+        </div>
+        <div style="flex: 1;">
+          <label style="font-size: 11px; color: var(--muted-foreground); display: block; margin-bottom: 4px;">Output Speed</label>
+          <select id="output-speed-select" style="margin-bottom: 0;">
+            <option value="1.0">1.0x</option>
+            <option value="1.25">1.25x</option>
+            <option value="1.5" selected>1.5x</option>
+            <option value="1.75">1.75x</option>
+            <option value="2.0">2.0x</option>
+          </select>
+        </div>
+      </div>
+      <button id="capture-audio-btn" style="width: 100%; background: var(--primary); color: var(--primary-foreground); border: none;">Capture Audio</button>
+    </section>
+
+    <section id="pdf-capture-section" class="card" style="display: none;">
+      <div class="target-header">
+        <h2 id="pdf-capture-title">PDF Document Extractor</h2>
+        <div class="type-badge">PDF</div>
+      </div>
+      <p id="pdf-tip" style="font-size: 11px; color: var(--muted-foreground); margin-bottom: 12px; line-height: 1.4;">
+        💡 Tip: Please scroll from top to bottom of the document to ensure all pages are rendered before downloading.
+      </p>
+      <button id="capture-pdf-btn" style="width: 100%; background: var(--primary); color: var(--primary-foreground); border: none;">Download PDF</button>
     </section>
 
     <section id="option-section" class="options-panel" style="display: none;">

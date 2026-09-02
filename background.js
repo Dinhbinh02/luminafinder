@@ -52,7 +52,184 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
+async function ensureOffscreenDocument() {
+  if (chrome.offscreen && chrome.offscreen.hasDocument) {
+    if (await chrome.offscreen.hasDocument()) return;
+  }
+  try {
+    const existingContexts = await chrome.runtime.getContexts({
+      contextTypes: ['OFFSCREEN_DOCUMENT']
+    });
+    if (existingContexts && existingContexts.length > 0) return;
+  } catch (e) {}
+
+  try {
+    await chrome.offscreen.createDocument({
+      url: 'offscreen.html',
+      reasons: ['AUDIO_PLAYBACK', 'BLOBS'],
+      justification: 'Decode audio stream and convert to MP3'
+    });
+  } catch (e) {
+    if (!e.message || !e.message.includes('Only a single offscreen document')) {
+      console.warn("Offscreen creation error:", e);
+    }
+  }
+}
+
+function sanitizePath(pathStr) {
+  return (pathStr || 'Audio')
+    .split('/')
+    .map(seg => seg.replace(/[\\*?:"<>|]/g, '').trim())
+    .filter(Boolean)
+    .join('/');
+}
+
+async function downloadKhokhoahocLesson(item) {
+  console.log(`[Fetchy Background] Processing lesson: "${item.name}" (ID: ${item.lessonId})...`);
+  currentProgress.lastFileName = item.name;
+  currentProgress.statusText = "Getting video stream...";
+
+  let videoSrc = "";
+  try {
+    const formData = new URLSearchParams();
+    formData.append('action', 'twi_load_lesson');
+    formData.append('lesson_id', item.lessonId);
+    if (item.courseId) formData.append('course_id', item.courseId);
+    if (item.productId) formData.append('product_id', item.productId);
+    if (item.nonce) formData.append('nonce', item.nonce);
+
+    const ajaxUrl = item.ajaxUrl || 'https://khokhoahoc.org/wp-admin/admin-ajax.php';
+    const ajaxRes = await fetch(ajaxUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: formData.toString(),
+      credentials: 'include'
+    });
+
+    const json = await ajaxRes.json();
+    if (json && json.success && json.data) {
+      const dataStr = typeof json.data === 'string' ? json.data : JSON.stringify(json.data);
+      const videoHtml = (json.data.video || dataStr);
+
+      // 1. SharePoint direct download link (Fastest, full 56MB MP4, pristine quality)
+      const spMatch = videoHtml.match(/(https:\/\/[a-z0-9\.\-]+\.sharepoint\.com\/[^\s"'<>]+)/i) ||
+                      dataStr.match(/(https:\/\/[a-z0-9\.\-]+\.sharepoint\.com\/[^\s"'<>]+)/i);
+
+      // 2. Google Drive video link
+      const gdMatch = videoHtml.match(/(https:\/\/(?:drive|docs)\.google\.com\/[^\s"'<>]+)/i);
+
+      // 3. Direct HTML video/source tag
+      const srcMatch = videoHtml.match(/src="([^"]+)"/i);
+      const iframeMatch = videoHtml.match(/<iframe[^>]+src="([^"]+)"/i);
+      const streamMatch = videoHtml.match(/data-stream-url="([^"]+)"/i);
+
+      if (spMatch && spMatch[1]) {
+        videoSrc = spMatch[1].replace(/&amp;/g, '&');
+      } else if (gdMatch && gdMatch[1]) {
+        videoSrc = gdMatch[1].replace(/&amp;/g, '&');
+      } else if (srcMatch && srcMatch[1] && !srcMatch[1].startsWith('blob:')) {
+        videoSrc = srcMatch[1].replace(/&amp;/g, '&');
+      } else if (iframeMatch && iframeMatch[1]) {
+        videoSrc = iframeMatch[1].replace(/&amp;/g, '&');
+      } else if (streamMatch && streamMatch[1]) {
+        videoSrc = streamMatch[1].replace(/&amp;/g, '&');
+      }
+    }
+  } catch (err) {
+    console.warn("[Fetchy Background] AJAX twi_load_lesson failed:", err);
+  }
+
+  if (!videoSrc) {
+    throw new Error(`Could not find video stream for lesson: ${item.name}`);
+  }
+
+  // If videoSrc is a proxy endpoint (twi_sp_stream), fetch the JSON to get the real Microsoft CDN URL!
+  if (videoSrc.includes('twi_sp_stream')) {
+    try {
+      console.log(`[Fetchy Background] Resolving Microsoft CDN URL from twi_sp_stream JSON endpoint...`);
+      const proxyRes = await fetch(videoSrc, { credentials: 'include' });
+      const proxyText = await proxyRes.text();
+      try {
+        const proxyJson = JSON.parse(proxyText);
+        const directUrl = proxyJson.url || proxyJson.src || proxyJson.stream_url || (proxyJson.data && (proxyJson.data.url || proxyJson.data.src));
+        if (directUrl) {
+          videoSrc = directUrl.replace(/&amp;/g, '&');
+          console.log(`[Fetchy Background] Resolved Microsoft CDN URL: ${videoSrc.substring(0, 100)}...`);
+        }
+      } catch (jsonErr) {
+        const urlMatch = proxyText.match(/https:\/\/[^\s"'<>]+/);
+        if (urlMatch) {
+          videoSrc = urlMatch[0].replace(/&amp;/g, '&');
+        }
+      }
+    } catch (proxyErr) {
+      console.warn("[Fetchy Background] Failed to resolve twi_sp_stream:", proxyErr);
+    }
+  }
+
+  console.log(`[Fetchy Background] Resolved stream URL for "${item.name}": ${videoSrc.substring(0, 100)}...`);
+
+  if (videoSrc.includes('drive.google.com')) {
+    const gdId = extractFileId(videoSrc);
+    if (gdId) {
+      try {
+        const infoUrl = `https://drive.google.com/u/0/get_video_info?docid=${gdId}&drive_originator_app=303`;
+        const infoRes = await fetch(infoUrl, { credentials: 'include' });
+        const infoText = await infoRes.text();
+        const params = parseParams(infoText);
+        const streams = parseStreams(params);
+        if (streams.length > 0) {
+          videoSrc = streams[0].url;
+        } else {
+          videoSrc = `https://drive.google.com/uc?id=${gdId}&export=download`;
+        }
+      } catch (e) {
+        videoSrc = `https://drive.google.com/uc?id=${gdId}&export=download`;
+      }
+    }
+  }
+
+  currentProgress.statusText = "Extracting Audio (MP3)...";
+  await ensureOffscreenDocument();
+
+  const safeFilename = sanitizePath(item.path || item.name);
+  console.log(`[Fetchy Background] Sending PROCESS_AUDIO_STREAM to offscreen document for: ${safeFilename}`);
+
+  await new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({
+      type: 'PROCESS_AUDIO_STREAM',
+      url: videoSrc,
+      filename: safeFilename
+    }, async response => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+      } else if (response && response.success && response.dataUrl) {
+        const downloadFilename = response.filename || safeFilename;
+        console.log(`[Fetchy Background] Audio processing complete. Downloading: ${downloadFilename}`);
+        try {
+          const downloadId = await chrome.downloads.download({
+            url: response.dataUrl,
+            filename: downloadFilename,
+            saveAs: false
+          });
+          resolve({ success: true, downloadId });
+        } catch (dlErr) {
+          console.warn("[Fetchy Background] chrome.downloads error:", dlErr);
+          reject(dlErr);
+        }
+      } else {
+        reject(new Error(response ? response.error : 'Audio extraction failed'));
+      }
+    });
+  });
+
+  currentProgress.current++;
+}
+
 async function downloadFile(item) {
+  if (item.isKhokhoahoc || item.type === 'lesson') {
+    return await downloadKhokhoahocLesson(item);
+  }
   currentProgress.lastFileName = item.name;
   try {
     let finalUrl = "";
@@ -78,10 +255,10 @@ async function downloadFile(item) {
           
           const bypassRes = await fetch(bypassUrl, { credentials: 'include' });
           let bypassHtml = await bypassRes.text();
-          
           bypassHtml = await inlineImages(bypassHtml, bypassUrl);
 
           await convertHtmlToPdf(bypassHtml, item.path || item.name);
+          currentProgress.current++;
           return;
         }
       } catch (e) {
@@ -106,7 +283,6 @@ async function downloadFile(item) {
 
     let cleanName = item.path.trim();
     const exts = ['.docx', '.xlsx', '.pptx', '.gdoc', '.gsheet', '.gslides', '.pdf', '.html', '.htm'];
-    
     let found = true;
     while (found) {
       found = false;
@@ -133,10 +309,11 @@ async function downloadFile(item) {
         saveAs: false
       }, resolve);
     });
+    
+    currentProgress.current++;
   } catch (e) {
     console.error("Download error", e);
-  } finally {
-    currentProgress.current++;
+    currentProgress.current++; 
   }
 }
 
@@ -145,33 +322,25 @@ async function inlineImages(html, baseUrl) {
   let match;
   let newHtml = html;
   const matches = [];
-  
   while ((match = imgRegex.exec(html)) !== null) {
     matches.push({ full: match[0], src: match[1] });
   }
-
   for (const m of matches) {
     try {
       let imgSrc = m.src;
-      if (imgSrc.startsWith('/')) {
-        imgSrc = new URL(imgSrc, baseUrl).href;
-      }
-      
+      if (imgSrc.startsWith('/')) imgSrc = new URL(imgSrc, baseUrl).href;
       const res = await fetch(imgSrc, { credentials: 'include' });
       const blob = await res.blob();
       const reader = new FileReader();
-      
       const base64Data = await new Promise((resolve) => {
         reader.onloadend = () => resolve(reader.result);
         reader.readAsDataURL(blob);
       });
-      
       newHtml = newHtml.replace(m.src, base64Data);
     } catch (e) {
       console.warn("Failed to inline image:", m.src, e);
     }
   }
-  
   return newHtml;
 }
 
@@ -220,28 +389,13 @@ async function convertHtmlToPdf(html, filePath) {
           background: white;
           margin: 0; padding: 0;
         }
-        ol, ul {
-          margin: 0.4em 0;
-          padding-left: 2em;
-        }
+        ol, ul { margin: 0.4em 0; padding-left: 2em; }
         ol { list-style-type: decimal; }
         ul { list-style-type: disc; }
-        li {
-          margin: 0.3em 0;
-          padding-left: 0.3em;
-          display: list-item !important;
-        }
+        li { margin: 0.3em 0; padding-left: 0.3em; display: list-item !important; }
         p, div { margin: 0.3em 0; }
-        
-        .app-container { margin-top: 0 !important; padding: 0 !important; }
-        .doc { padding: 0 !important; }
-        .doc-content { padding: 0 !important; max-width: 100% !important; }
-        
         p:empty { display: none !important; }
-        p > span:only-child:empty { display: none !important; }
         h1 { font-size: 18pt; font-weight: bold; margin: 0.8em 0 0.3em; }
-        h2 { font-size: 15pt; font-weight: bold; margin: 0.7em 0 0.3em; }
-        h3 { font-size: 13pt; font-weight: bold; margin: 0.6em 0 0.3em; }
         table { width: 100%; border-collapse: collapse; margin: 0.5em 0; }
         td, th { border: 1px solid #ccc; padding: 6px 10px; vertical-align: top; }
         img { max-width: 100%; height: auto; display: block; margin: 0.5em auto; }
@@ -249,18 +403,12 @@ async function convertHtmlToPdf(html, filePath) {
     `;
 
     if (!html.includes('charset=')) {
-      if (html.includes('<head>')) {
-        html = html.replace('<head>', '<head><meta charset="utf-8">');
-      } else {
-        html = '<meta charset="utf-8">' + html;
-      }
+      if (html.includes('<head>')) html = html.replace('<head>', '<head><meta charset="utf-8">');
+      else html = '<meta charset="utf-8">' + html;
     }
 
-    if (html.includes('</head>')) {
-          html = html.replace('</head>', prettyCss + '</head>');
-    } else {
-      html = prettyCss + html;
-    }
+    if (html.includes('</head>')) html = html.replace('</head>', prettyCss + '</head>');
+    else html = prettyCss + html;
 
     const tab = await chrome.tabs.create({ url: 'about:blank', active: false });
     await new Promise(r => setTimeout(r, 500));
@@ -270,33 +418,17 @@ async function convertHtmlToPdf(html, filePath) {
       await chrome.debugger.sendCommand({ tabId: tab.id }, 'Page.enable');
       const frameTree = await chrome.debugger.sendCommand({ tabId: tab.id }, 'Page.getFrameTree');
       const frameId = frameTree.frameTree.frame.id;
-      await chrome.debugger.sendCommand({ tabId: tab.id }, 'Page.setDocumentContent', {
-        frameId: frameId,
-        html: html
-      });
-
+      await chrome.debugger.sendCommand({ tabId: tab.id }, 'Page.setDocumentContent', { frameId: frameId, html: html });
       await new Promise(r => setTimeout(r, 3000));
 
-      const result = await chrome.debugger.sendCommand(
-        { tabId: tab.id },
-        'Page.printToPDF',
-        {
-          printBackground: true,
-          paperWidth: 8.27,
-          paperHeight: 11.69,
-          marginTop: 0.6,
-          marginBottom: 0.6,
-          marginLeft: 0.7,
-          marginRight: 0.7,
-          scale: 0.9
-        }
-      );
+      const result = await chrome.debugger.sendCommand({ tabId: tab.id }, 'Page.printToPDF', {
+        printBackground: true, paperWidth: 8.27, paperHeight: 11.69,
+        marginTop: 0.6, marginBottom: 0.6, marginLeft: 0.7, marginRight: 0.7, scale: 0.9
+      });
 
       const pdfUrl = `data:application/pdf;base64,${result.data}`;
-      
       let cleanName = filePath.trim();
       const exts = ['.docx', '.xlsx', '.pptx', '.gdoc', '.gsheet', '.gslides', '.pdf', '.html', '.htm'];
-      
       let found = true;
       while (found) {
         found = false;
@@ -308,7 +440,6 @@ async function convertHtmlToPdf(html, filePath) {
           }
         }
       }
-      
       const safeName = (cleanName + '.pdf').replace(/[\\*?:"<>|]/g, "").trim();
       chrome.downloads.download({ url: pdfUrl, filename: safeName, saveAs: false });
     } finally {

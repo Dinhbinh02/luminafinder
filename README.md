@@ -1,16 +1,17 @@
-# 📂 LuminaFinder
+# 📂 Fetchy
 
-![LuminaFinder Banner](banner.png)
+![Fetchy Banner](banner.png)
 
-**LuminaFinder** is a lightweight, high-performance Chrome Extension designed to streamline your Google Drive and Google Docs experience. It provides a minimalist, unified interface for scanning folders and downloading files with advanced features like parallel processing and export format selection.
+**Fetchy** is a lightweight, high-performance Chrome Extension designed to streamline your Google Drive, Google Docs, and online course learning experience. It provides a minimalist, unified interface for scanning folders, downloading files, and extracting lecture audio with parallel processing and export format selection.
 
 ---
 
 ## ✨ Features
 
 - **🚀 Parallel Scanning:** High-speed recursive folder scanning using optimized parallel requests.
+- **🎓 Course & Lesson Downloader:** Auto-detects online LMS courses (e.g. khokhoahoc.org) and batch-downloads audio tracks with 100% original pitch and clarity.
 - **📄 Document Export:** One-click export for Google Docs, Sheets, and Slides into multiple formats (PDF, DOCX, XLSX, etc.).
-- **🎬 Video Discovery:** Automatically identifies video streams and direct download links for Google Drive assets.
+- **🎬 Media & Audio Discovery:** Automatically identifies video streams and extracts audio tracks directly into high-fidelity MP3.
 - **🎨 Minimalist UI:** A sleek, glassmorphism-inspired design with dynamic state animations.
 - **🔒 Privacy First:** Local metadata extraction—your cookies and data never leave your browser.
 - **🔄 Intelligent Refresh:** Auto-updates expired download links and tokens on-the-fly.
@@ -21,23 +22,23 @@
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/[YOUR_USERNAME]/lumina-finder.git
+    git clone https://github.com/[YOUR_USERNAME]/fetchy.git
     ```
 2.  **Open Chrome Extensions:**
     Navigate to `chrome://extensions/` in your browser.
 3.  **Enable Developer Mode:**
     Toggle the switch in the top right corner.
 4.  **Load Unpacked:**
-    Click **"Load unpacked"** and select the `lumina-finder` directory.
+    Click **"Load unpacked"** and select the `fetchy` directory.
 
 ---
 
 ## 📖 Usage
 
-1.  Open any Google Drive folder or document.
-2.  Click the **Lumina Finder** icon in your toolbar.
-3.  Choose your desired files or export formats.
-4.  Hit **Download** and let Lumina do the rest.
+1.  Open any Google Drive folder, document, or course page.
+2.  Click the **Fetchy** icon in your toolbar.
+3.  Choose your desired files, lessons, or export formats.
+4.  Hit **Download** and let Fetchy do the rest.
 
 ---
 
